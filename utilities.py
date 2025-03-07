@@ -5,7 +5,6 @@ def cleanup_str(string: str) -> str:
         .replace("?", "")
         .replace("()", "")
         .replace("  ", " ")
-        .replace("(pears)", "(pear)")
     )
 
 
@@ -13,4 +12,3 @@ def remove_ssl_error() -> None:
     import warnings
     from urllib3.exceptions import NotOpenSSLWarning
     warnings.filterwarnings("ignore", category=NotOpenSSLWarning)
-
