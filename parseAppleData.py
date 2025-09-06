@@ -1,11 +1,141 @@
-import numpy as np
+import logging
+import sys
 import pandas as pd
 import os
 import time
-from utilities import *
+from utilities import (
+    cleanup_str,
+    setup_logging,
+    clean_events_strings,
+    get_datetime,
+    to_csv_file,
+)
+from fuzzywuzzy import process
 
 
-def get_data_from_county_fairs():
+def _get_data_from_sheets(
+    sheet_data: pd.DataFrame, column: str, index: int, log: logging.Logger
+) -> str:
+    # column is the specific column head you want to excess.
+    # Excel_sheet is the sheet data which you are searching through.
+    # row is the int index of the give row.
+    try:
+        return sheet_data[column].iloc[index]
+    except KeyError:
+        try:
+            if column == "Presumed ID":
+                most_likely_presumed_id = process.extractOne(
+                    query="Presumed ID", choices=list(sheet_data.columns)
+                )
+                if most_likely_presumed_id[1] < 90:
+                    log.warning(
+                        f"bad match: {most_likely_presumed_id[1]}>"
+                        f"- Fix: failed to replacing (Presumed ID) did not solve.>\n"
+                        " - replacing missing data with nan"
+                    )
+                    return ""
+
+                data = sheet_data[most_likely_presumed_id[0]].iloc[index]
+
+                return data
+            elif column == "Alt. Name Given":
+                most_likely_presumed_id = process.extractOne(
+                    query="Alt. Name Given", choices=list(sheet_data.columns)
+                )
+                if most_likely_presumed_id[1] < 90:
+                    log.warning(
+                        f"bad match: {most_likely_presumed_id[1]}>"
+                        f"- Fix: failed to replacing (Alt. Name Given) did not solve.>\n"
+                        " - replacing missing data with nan"
+                    )
+                data = sheet_data[most_likely_presumed_id[0]].iloc[index]
+                return data
+
+            elif column == "Variety":
+                most_likely_presumed_id = process.extractOne(
+                    query="Variety", choices=list(sheet_data.columns)
+                )
+                if most_likely_presumed_id[1] < 90:
+                    log.warning(
+                        f"bad match: {most_likely_presumed_id[1]}>"
+                        f"- Fix: failed to replacing (Variety) did not solve.>\n"
+                        " - replacing missing data with nan"
+                    )
+                data = sheet_data[most_likely_presumed_id[0]].iloc[index]
+                return data
+        except Exception as e:
+            log.critical(f"unknown problem gathering data with best fit exception: {e}")
+            sys.exit(1)
+
+
+def _check_column_header_for_apples(
+    headers: list, log, county: str, sheet: str
+) -> None:
+    if len(headers) == 0:
+        log.error(
+            f"No columns at all:>\n"
+            f" - Info: there are not columns in this sheet\n"
+            f" -  Loc: file = {county}, sheet = {sheet}\n"
+            f" -  Fix: by-passing this sheet all data from {sheet} will not be recorded."
+        )
+        return None
+    if "Variety" not in headers:
+        most_likely_presumed_id = process.extractOne(query="Variety", choices=headers)
+        if most_likely_presumed_id[1] > 90:
+            log.warning(
+                f"No column header in sheet matching: Variety>.\n"
+                f" - Info: Current_headers are = {headers}\n"
+                f" -  Loc: located at: file = {county}, sheet = {sheet}\n"
+                f" -  Fix: replace with closest match: {most_likely_presumed_id}\n."
+            )
+        else:
+            log.error(
+                f"No column header in sheet matching and not close matches: Variety>.\n"
+                f" - Info: Current_headers are = {headers}\n"
+                f" -  Loc: located at: file = {county}, sheet = {sheet}\n"
+                f" -  Fix: replace data with blank string: {most_likely_presumed_id}\n."
+            )
+    if "Alt. Name Given" not in headers:
+        most_likely_presumed_id = process.extractOne(
+            query="Alt. Name Given", choices=headers
+        )
+        if most_likely_presumed_id[1] > 90:
+            log.warning(
+                f"No column header in sheet matching: Alt. Name Given>.\n"
+                f" - Info: Current_headers are = {headers}\n"
+                f" -  Loc: located at: file = {county}, sheet = {sheet}\n"
+                f" -  Fix: replace with closest match: {most_likely_presumed_id}\n."
+            )
+        else:
+
+            log.error(
+                f"No column header in sheet matching and not close matches: Alt. Given Name>.\n"
+                f" - Info: Current_headers are = {headers}\n"
+                f" -  Loc: located at: file = {county}, sheet = {sheet}\n"
+                f" -  Fix: replace data with blank string: {most_likely_presumed_id}\n."
+            )
+    if "Presumed ID" not in headers:
+        most_likely_presumed_id = process.extractOne(
+            query="Presumed ID", choices=headers
+        )
+        if most_likely_presumed_id[1] > 90:
+            log.warning(
+                f"No column header in sheet matching: Presumed ID>.\n"
+                f" - Info: Current_headers are = {headers}\n"
+                f" -  Loc: located at: file = {county}, sheet = {sheet}\n"
+                f" -  Fix: replace with closest match: {most_likely_presumed_id}\n."
+            )
+        else:
+
+            log.error(
+                f"No column header in sheet matching and not close matches: Presumed ID>.\n"
+                f" - Info: Current_headers are = {headers}\n"
+                f" -  Loc: located at: file = {county}, sheet = {sheet}\n"
+                f" -  Fix: replace data with blank string: {most_likely_presumed_id}\n."
+            )
+
+
+def get_data_from_county_fairs(log: logging.Logger) -> pd.DataFrame:
     # for counts prints
     time_start = time.time()
     t = 0
@@ -15,11 +145,25 @@ def get_data_from_county_fairs():
 
     # gets a list of the apple data files.
     file_list = os.listdir("rawAppleData")
+    file_list.remove(".DS_Store")
 
     for county in file_list:
+        if "~$" in county:
+            continue
+        if not county.endswith(".xlsx"):
+            log.warning(f"not and excel file:>" f" - Info: file name is {county}")
+            continue
 
-        apple_sheet_names = pd.ExcelFile(f"rawAppleData/{county}").sheet_names
-        apple_sheet_names.remove('Varieties List')
+        sheet_names = pd.ExcelFile(f"rawAppleData/{county}").sheet_names
+
+        try:
+            sheet_names.remove("Varieties List")
+        except ValueError:
+            log.warning(
+                f"There is no variety list to be removed: {county}>\n"
+                f" - Info: current sheets names {sheet_names}\n"
+            )
+
         county_name = county.replace("Copy of Maine, ", "").replace(
             " County Fairs.xlsx", ""
         )
@@ -27,68 +171,98 @@ def get_data_from_county_fairs():
         # update counts and start a per-file timer and print.
         file_start_time = time.time()
         t += 1
-        print(f"{t}/{len(file_list)}, {county_name}")
 
-        for fair in apple_sheet_names:
-            df = pd.read_excel(f"rawAppleData/{county}", sheet_name=fair, keep_default_na=False)
+        log.info(f"apple: starting file {t}/{len(file_list)}, {county_name}...")
+
+        for sheet in sheet_names:
+            df = pd.read_excel(
+                f"rawAppleData/{county}", sheet_name=sheet, keep_default_na=False
+            )
 
             years = []
 
             for c in df.columns.values:
                 if str(c).isdigit():
                     years.append(c)
+            col_headers = list(df.columns)
+            _check_column_header_for_apples(
+                log=log, county=county, sheet=sheet, headers=col_headers
+            )
 
-                for year in years:
-                    for i in range(df.shape[0]):
+            for year in years:
+                for i in range(df.shape[0]):
+                    if not pd.isnull(df[year].iloc[i]):
                         if df[year].iloc[i] != "":
-                            try:
-                                given_id: str = df["Variety"].iloc[i].replace("(Pears)", "(pear)").replace("(Pear)",
-                                                                                                           "(pear)")
-                                alt_id: str = df["Alt. Name Given"].iloc[i].replace("(Pears)", "(pear)").replace(
-                                    "(Pear)", "(pear)")
-                                presumed_id: str = df["Presumed ID"].iloc[i].replace("(Pears)", "(pear)").replace(
-                                    "(Pear)", "(pear)")
+                            given_name: str = _get_data_from_sheets(
+                                sheet_data=df, column="Variety", index=i, log=log
+                            )
+                            alt_name: str = _get_data_from_sheets(
+                                sheet_data=df,
+                                column="Alt. Name Given",
+                                index=i,
+                                log=log,
+                            )
+                            presumed_id: str = _get_data_from_sheets(
+                                sheet_data=df,
+                                column="Presumed ID",
+                                index=i,
+                                log=log,
+                            )
 
-                                is_apple = not "(pear)" in given_id or "(pear)" in presumed_id or "(pear)" in alt_id
+                            is_apple = not "(pear)" in cleanup_str(given_name)
 
-                                given_id = given_id.replace("(pear)", "")
-                                presumed_id = presumed_id.replace("(pear)", "")
-                                alt_id = alt_id.replace("(pear)", "")
-
-                                rows.append({
+                            rows.append(
+                                {
                                     "County": cleanup_str(county_name),
-                                    "Fair": cleanup_str(fair),
+                                    "Event": cleanup_str(sheet),
                                     "Year": int(year),
                                     "IsApple": is_apple,
-                                    "Given_ID": given_id,
-                                    "Given_ID_Clean": cleanup_str(given_id),
-                                    "Alt_ID": alt_id,
-                                    "Alt_ID_Clean": cleanup_str(alt_id),
-                                    "Presumed_ID": presumed_id,
-                                    "Presumed_ID_Clean": cleanup_str(presumed_id),
-                                })
+                                    "Given Name": given_name,
+                                    "Given Name Clean": cleanup_str(given_name),
+                                    "Old Alt Name": alt_name,
+                                    "Alt Name Clean": cleanup_str(alt_name),
+                                    "Old Presumed Name": presumed_id,
+                                    "Presumed Name Clean": cleanup_str(presumed_id),
+                                }
+                            )
 
-                            except Exception as e:
-                                g = list(df.columns)
-                                if g[2] != "Presumed ID":
-                                    print(
-                                        f"ERROR: Presumed ID is wrong it is ({g[2]}), the error is in {county} {fair}"
-                                    )
-                                if g[1] != "Alt. Name Given":
-                                    print(
-                                        f"ERROR: Alt. Name Given is wrong it is ({g[1]}), the error is in {county} {fair}"
-                                    )
-                                print(e)
-
-        print(f" time: {time.time() - file_start_time}s")
-    print(f" time total: {time.time() - time_start}s")
+        log.info(
+            f"apple: {county_name} complete time taken = {time.time() - file_start_time}s"
+        )
+    log.info(
+        f"gathering data from apple files complete! :)"
+        f" - total to to get datetime total: {time.time() - time_start}s"
+    )
     data = pd.DataFrame.from_records(rows)
-    print("done reading files.")
     return data
 
-def parse_apple():
-    apple_df = get_data_from_county_fairs()
-    return apple_df
 
-if __name__ == '__main__':
-    apple_data = parse_apple()
+def _check_for_duplicates(log: logging.Logger, df: pd.DataFrame) -> None:
+    duplicated = df.loc(axis=0)[df.duplicated(keep="first")]
+    if len(duplicated.index) > 0:
+        log.error(
+            f"Duplicated source Date Frame found:>\n"
+            f" - Info: there is ({int(len(duplicated))}) apple duplicated\n"
+            f"              these sources are\n"
+            f" {duplicated}\n"
+            f" -  Fix drop duplicates\n"
+        )
+
+
+def parse_apple(log: logging.Logger) -> pd.DataFrame:
+    log.info("Parsing apple data...")
+    apples_df = get_data_from_county_fairs(log)
+
+    _check_for_duplicates(log=log, df=apples_df)
+    apples_df.drop_duplicates(keep="first", inplace=True)
+    log.info("successfully dropped duplicate apple data!")
+
+    apples_df = clean_events_strings(apples_df)
+    log.info("successfully gathered and cleaned apple data!")
+    return apples_df
+
+
+if __name__ == "__main__":  # this is only for debugging this file
+    apple_log = setup_logging("Apples log")
+    apples = parse_apple(apple_log)
+    to_csv_file(path="cleanedData/Apples", name="apples", df=apples)
