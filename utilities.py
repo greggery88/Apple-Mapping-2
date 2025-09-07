@@ -6,7 +6,8 @@ from datetime import datetime
 from gspread_pandas import conf, Client, Spread
 from os import path
 
-def  get_gs_config():
+
+def get_gs_config():
     service_account_file_path = "service_account.json"
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -17,6 +18,7 @@ def  get_gs_config():
         path.abspath("service_account.json").replace("service_account.json", ""),
         file_name=service_account_file_path,
     )
+
 
 def get_datetime() -> str:
     return datetime.strftime(datetime.now(), "%Y-%m-%d-%H:%M")

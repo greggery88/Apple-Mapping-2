@@ -255,9 +255,7 @@ def _clean_source_separate_page_number(
         return page_number_split
 
 
-def _get_data_from_sources(
-    log: logging.Logger, gs_config: GSpreadConfig
-) -> pd.DataFrame:
+def _get_data_from_sources(log: logging.Logger, gs_config) -> pd.DataFrame:
     time_start = time.time()
     t = 0
     # gathers the data from the Directory rawFairSources into a pandas dataFrame.
@@ -268,7 +266,7 @@ def _get_data_from_sources(
     rows = []
 
     client = Client(config=gs_config)
-    spread_info = client.find_spreadsheet_files_in_folders("sources")["sources"]
+    spread_info = client.find_spreadsheet_files_in_folders("SourceFiles")["SourceFiles"]
 
     for info_dict in spread_info:
         spread_id = info_dict["id"]
@@ -530,9 +528,7 @@ def _clean_source_data(source_df):
 """ this is the main function of this file. It is called by the main function and sets up processes the data."""
 
 
-def parse_sources(
-    log: logging.Logger, gs_config: GSpreadConfig, split_sources: bool = True
-):
+def parse_sources(log: logging.Logger, gs_config, split_sources: bool = True):
     log.info("Parsing Sources...")
 
     # gets the data from the sheets

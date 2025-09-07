@@ -7,7 +7,8 @@ from utilities import (
     cleanup_str,
     setup_logging,
     clean_events_strings,
-    to_csv_file, get_gs_config,
+    to_csv_file,
+    get_gs_config,
 )
 from fuzzywuzzy import process
 
@@ -139,9 +140,7 @@ def _check_column_header_for_apples(
             )
 
 
-def _get_data_from_county_fairs(
-    log: logging.Logger, gs_config
-) -> pd.DataFrame:
+def _get_data_from_county_fairs(log: logging.Logger, gs_config) -> pd.DataFrame:
     # for counts prints
     time_start = time.time()
     t = 0
