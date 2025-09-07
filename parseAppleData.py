@@ -1,16 +1,17 @@
 import logging
 import sys
 import pandas as pd
-import os
 import time
+from gspread_pandas import Spread, Client
 from utilities import (
     cleanup_str,
     setup_logging,
     clean_events_strings,
-    get_datetime,
-    to_csv_file,
+    to_csv_file, get_gs_config,
 )
 from fuzzywuzzy import process
+
+pd.set_option("future.no_silent_downcasting", True)
 
 
 def _get_data_from_sheets(
@@ -69,7 +70,10 @@ def _get_data_from_sheets(
 
 
 def _check_column_header_for_apples(
-    headers: list, log, county: str, sheet: str
+    headers: list,
+    log,
+    county: str,
+    sheet: str,
 ) -> None:
     if len(headers) == 0:
         log.error(
@@ -135,7 +139,9 @@ def _check_column_header_for_apples(
             )
 
 
-def get_data_from_county_fairs(log: logging.Logger) -> pd.DataFrame:
+def _get_data_from_county_fairs(
+    log: logging.Logger, gs_config
+) -> pd.DataFrame:
     # for counts prints
     time_start = time.time()
     t = 0
@@ -143,88 +149,84 @@ def get_data_from_county_fairs(log: logging.Logger) -> pd.DataFrame:
     # rows for file construction
     rows = []
 
-    # gets a list of the apple data files.
-    file_list = os.listdir("rawAppleData")
-    file_list.remove(".DS_Store")
+    client = Client(config=gs_config)
+    spread_info = client.find_spreadsheet_files_in_folders("ApplesFiles")["ApplesFiles"]
 
-    for county in file_list:
-        if "~$" in county:
-            continue
-        if not county.endswith(".xlsx"):
-            log.warning(f"not and excel file:>" f" - Info: file name is {county}")
-            continue
-
-        sheet_names = pd.ExcelFile(f"rawAppleData/{county}").sheet_names
-
-        try:
-            sheet_names.remove("Varieties List")
-        except ValueError:
-            log.warning(
-                f"There is no variety list to be removed: {county}>\n"
-                f" - Info: current sheets names {sheet_names}\n"
-            )
-
-        county_name = county.replace("Copy of Maine, ", "").replace(
-            " County Fairs.xlsx", ""
+    for info_dict in spread_info:
+        spread_id = info_dict["id"]
+        county_name = (
+            info_dict["name"]
+            .replace("Copy of", "")
+            .replace("Maine,", "")
+            .replace("County Fairs", "")
+            .strip()
+            .lower()
         )
-
         # update counts and start a per-file timer and print.
         file_start_time = time.time()
         t += 1
+        log.info(f"apples: starting file {t}/{len(spread_info)}, {county_name}...")
 
-        log.info(f"apple: starting file {t}/{len(file_list)}, {county_name}...")
+        spreadsheet = Spread(spread_id, config=gs_config)
 
-        for sheet in sheet_names:
-            df = pd.read_excel(
-                f"rawAppleData/{county}", sheet_name=sheet, keep_default_na=False
-            )
+        sheets = spreadsheet.sheets
 
-            years = []
+        for sheet in sheets:
 
-            for c in df.columns.values:
-                if str(c).isdigit():
-                    years.append(c)
-            col_headers = list(df.columns)
-            _check_column_header_for_apples(
-                log=log, county=county, sheet=sheet, headers=col_headers
-            )
+            sheet_name = sheet.title.strip().lower()
 
-            for year in years:
-                for i in range(df.shape[0]):
-                    if not pd.isnull(df[year].iloc[i]):
-                        if df[year].iloc[i] != "":
-                            given_name: str = _get_data_from_sheets(
-                                sheet_data=df, column="Variety", index=i, log=log
-                            )
-                            alt_name: str = _get_data_from_sheets(
-                                sheet_data=df,
-                                column="Alt. Name Given",
-                                index=i,
-                                log=log,
-                            )
-                            presumed_id: str = _get_data_from_sheets(
-                                sheet_data=df,
-                                column="Presumed ID",
-                                index=i,
-                                log=log,
-                            )
+            if sheet_name != "varieties list":
 
-                            is_apple = not "(pear)" in cleanup_str(given_name)
+                spreadsheet.open_sheet(sheet)
 
-                            rows.append(
-                                {
-                                    "County": cleanup_str(county_name),
-                                    "Event": cleanup_str(sheet),
-                                    "Year": int(year),
-                                    "IsApple": is_apple,
-                                    "Given Name": given_name,
-                                    "Given Name Clean": cleanup_str(given_name),
-                                    "Old Alt Name": alt_name,
-                                    "Alt Name Clean": cleanup_str(alt_name),
-                                    "Old Presumed Name": presumed_id,
-                                    "Presumed Name Clean": cleanup_str(presumed_id),
-                                }
-                            )
+                df = spreadsheet.sheet_to_df().reset_index()
+
+                years = []
+
+                for c in df.columns.values:
+                    if str(c).isdigit():
+                        years.append(c)
+                col_headers = list(df.columns)
+                _check_column_header_for_apples(
+                    log=log, county=county_name, sheet=sheet_name, headers=col_headers
+                )
+
+                for year in years:
+                    for i in range(df.shape[0]):
+                        if not pd.isnull(df[year].iloc[i]):
+                            if df[year].iloc[i] != "":
+                                given_name: str = _get_data_from_sheets(
+                                    sheet_data=df, column="Variety", index=i, log=log
+                                )
+                                alt_name: str = _get_data_from_sheets(
+                                    sheet_data=df,
+                                    column="Alt. Name Given",
+                                    index=i,
+                                    log=log,
+                                )
+                                presumed_id: str = _get_data_from_sheets(
+                                    sheet_data=df,
+                                    column="Presumed ID",
+                                    index=i,
+                                    log=log,
+                                )
+
+                                is_apple = not "(pear)" in cleanup_str(given_name)
+
+                                rows.append(
+                                    {
+                                        "County": county_name,
+                                        "Event": cleanup_str(sheet_name),
+                                        "Year": int(year),
+                                        "IsApple": is_apple,
+                                        "Given Name": given_name,
+                                        "Given Name Clean": cleanup_str(given_name),
+                                        "Old Alt Name": alt_name,
+                                        "Alt Name Clean": cleanup_str(alt_name),
+                                        "Old Presumed Name": presumed_id,
+                                        "Presumed Name Clean": cleanup_str(presumed_id),
+                                    }
+                                )
 
         log.info(
             f"apple: {county_name} complete time taken = {time.time() - file_start_time}s"
@@ -249,9 +251,9 @@ def _check_for_duplicates(log: logging.Logger, df: pd.DataFrame) -> None:
         )
 
 
-def parse_apple(log: logging.Logger) -> pd.DataFrame:
+def parse_apple(log: logging.Logger, gs_config) -> pd.DataFrame:
     log.info("Parsing apple data...")
-    apples_df = get_data_from_county_fairs(log)
+    apples_df = _get_data_from_county_fairs(log=log, gs_config=gs_config)
 
     _check_for_duplicates(log=log, df=apples_df)
     apples_df.drop_duplicates(keep="first", inplace=True)
@@ -264,5 +266,5 @@ def parse_apple(log: logging.Logger) -> pd.DataFrame:
 
 if __name__ == "__main__":  # this is only for debugging this file
     apple_log = setup_logging("Apples log")
-    apples = parse_apple(apple_log)
+    apples = parse_apple(apple_log, get_gs_config())
     to_csv_file(path="cleanedData/Apples", name="apples", df=apples)

@@ -87,8 +87,10 @@ def main() -> None:
     """
     log = setup_logging("Main log")  # this is the logger setup!
 
+    log.info("make config")
+    gs_config = get_gs_config()
     # calls the function that parse the apple data.
-    apple_df = parse_apple(log)
+    apple_df = parse_apple(log, gs_config)
     log.info(f"apple dataframe events are cleaned")
 
     apple_df.replace("", np.nan, inplace=True)
@@ -104,7 +106,7 @@ def main() -> None:
     log.info("cleaned apple names!")
 
     # calls the function that parse the sources.
-    source_df = parse_sources(log, split_sources=False)
+    source_df = parse_sources(log, gs_config, split_sources=False)
     log.info(f"source dataframe events are cleaned")
 
     # merge sources and apples data.
