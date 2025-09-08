@@ -274,7 +274,7 @@ def _get_data_from_sources(log: logging.Logger, gs_config) -> pd.DataFrame:
             info_dict["name"]
             .replace("Copy of", "")
             .replace("Maine,", "")
-            .replace("County Fairs", "")
+            .replace("County Sources", "")
             .strip()
             .lower()
         )
