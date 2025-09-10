@@ -3,7 +3,7 @@ from mergeSourceAndApples import merge_sources_n_apples
 from parseSources import parse_sources
 from parseAppleData import parse_apple
 from utilities import *
-
+import numpy as np
 
 """
 MAIN:
@@ -82,13 +82,15 @@ this format is standardized for this project to this format and goes.
 
 def main() -> None:
     """this is the main function it tells the order for everything to happen it.
-    it starts by setting up a logger this is the system that prints out information
-    about the process of and warnings and errors.
+    it starts by setting up a logger, which is the system that prints out information
+    about the process, warnings, and errors.
     """
     log = setup_logging("Main log")  # this is the logger setup!
 
-    # calls the function that parse the apple data.
-    apple_df = parse_apple(log)
+    log.info("make config")
+    gs_config = get_gs_config("JackClientIDs.json")
+    # calls the function that parses the Apple data.
+    apple_df = parse_apple(log, gs_config)
     log.info(f"apple dataframe events are cleaned")
 
     apple_df.replace("", np.nan, inplace=True)
@@ -103,15 +105,22 @@ def main() -> None:
     )
     log.info("cleaned apple names!")
 
-    # calls the function that parse the sources.
-    source_df = parse_sources(log, split_sources=False)
+    # calls the function that parses the sources.
+    source_df = parse_sources(log, gs_config, split_sources=False)
     log.info(f"source dataframe events are cleaned")
 
-    # merge sources and apples data.
+    # merge sources and Apple's data.
     data = merge_sources_n_apples(log, apple_df, source_df)
 
     # send to csv
     to_csv_file(df=data, path="cleanedData/Full", name="data")
+    clean_spread = Spread(
+        spread=f"CleanedData_{get_datetime()}", create_spread=True, config=gs_config
+    )
+    clean_spread.move(path="/TestFilesApples/OutputData/")
+    clean_spread.df_to_sheet(data, index=False, headers=True)
+    spreadsheet_url = clean_spread.url
+    print(f"Spreadsheet URL: {spreadsheet_url}")
     log.info(f"final data written to data.csv")
 
 

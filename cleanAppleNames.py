@@ -7,7 +7,7 @@ from utilities import setup_logging, find_latest_file, get_datetime, to_csv_file
 
 def _fix_presumed_name(df: pd.DataFrame) -> pd.DataFrame:
     new_name = "Alt Presumed Names"
-    df = (
+    nf = (
         df[["Use Name", "Presumed Name: Other"]]
         .dropna()
         .drop_duplicates()
@@ -15,10 +15,10 @@ def _fix_presumed_name(df: pd.DataFrame) -> pd.DataFrame:
         .copy()
     )
     groupby = (
-        df[["Use Name", "Presumed Name: 1"]]
+        nf[["Use Name", "Presumed Name: 1"]]
         .drop_duplicates()
         .merge(
-            df,
+            nf,
             on=[
                 "Use Name",
                 "Presumed Name: 1",
@@ -268,3 +268,4 @@ if __name__ == "__main__":
         path="cleanedData/AppleNamesCleaned",
         name="cleanApplesNames",
     )
+    CLN_log.info("finished cleaning ApplesNames!")

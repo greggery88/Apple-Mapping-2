@@ -3,6 +3,21 @@ import pandas as pd
 import os
 import numpy as np
 from datetime import datetime
+from gspread_pandas import conf, Client, Spread
+from os import path
+
+
+def get_gs_config(service_account_file_path="service_account.json"):
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+
+    return conf.get_config(
+        path.abspath(service_account_file_path).replace(service_account_file_path, ""),
+        file_name=service_account_file_path,
+    )
 
 
 def get_datetime() -> str:

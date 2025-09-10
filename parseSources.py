@@ -4,10 +4,13 @@ import numpy as np
 import os
 from datetime import datetime
 import time
+from gspread_pandas import Spread, Client
 from utilities import *
 
+pd.set_option("future.no_silent_downcasting", True)
 
-def _separate_source(source_df):
+
+def _separate_source(source_df: pd.DataFrame) -> pd.DataFrame:
     column_names = [
         "Publication",
         "Date",
@@ -191,7 +194,9 @@ def _clean_date(date, filename, sheet, year, log):
         return pd.to_datetime(date, yearfirst=True)
 
 
-def _clean_source_separate_page_number(page_numbers, filename, sheet, year, log):
+def _clean_source_separate_page_number(
+    page_numbers: datetime, county_name: str, sheet, year: int, log: logging.Logger
+):
     if type(page_numbers) == np.int64 or type(page_numbers) == int:
         return [np.int64(page_numbers)]
     elif page_numbers == "":
@@ -220,7 +225,7 @@ def _clean_source_separate_page_number(page_numbers, filename, sheet, year, log)
             log.debug(
                 f"Page number is not an integer is: (supplemental)>\n"
                 f" - Info: page_numbers = {pn_clean}\n"
-                f" - Loc: file = {filename}, sheet = {sheet}, year = {year}\n"
+                f" - Loc: file = {county_name}, sheet = {sheet}, year = {year}\n"
                 f" - Fix: return 0 (0 = supplemental)>\n"
             )
             page_number_split = [
@@ -230,7 +235,7 @@ def _clean_source_separate_page_number(page_numbers, filename, sheet, year, log)
             log.debug(
                 f"Page number is not an integer is: (unknown)>\n"
                 f" - Info: page_numbers = {pn_clean}\n"
-                f" - Loc: file = {filename}, sheet = {sheet}, year = {year}\n"
+                f" - Loc: file = {county_name}, sheet = {sheet}, year = {year}\n"
                 f" - Fix: return nans>\n"
             )
             page_number_split = [
@@ -243,14 +248,14 @@ def _clean_source_separate_page_number(page_numbers, filename, sheet, year, log)
             log.critical(
                 f"More than three page numbers>\n"
                 f" - Info: page_numbers = {page_number_split}\n"
-                f" - Loc: file = {filename}, sheet = {sheet}, year = {year}\n"
+                f" - Loc: file = {county_name}, sheet = {sheet}, year = {year}\n"
                 f" - Fix: replace with nans"
             )
             sys.exit(1)
         return page_number_split
 
 
-def _get_data_from_sources(log) -> pd.DataFrame:
+def _get_data_from_sources(log: logging.Logger, gs_config) -> pd.DataFrame:
     time_start = time.time()
     t = 0
     # gathers the data from the Directory rawFairSources into a pandas dataFrame.
@@ -260,40 +265,40 @@ def _get_data_from_sources(log) -> pd.DataFrame:
     # list to story the data as is gathered from the Excel files
     rows = []
 
-    # set up for mainloop to loop over all files in the source data directory
-    file_list = os.listdir("rawFairSourcesData")
-    file_list.remove(".DS_Store")
-    for filename in file_list:
-        if "~$" in filename:
-            continue
-        if not filename.endswith(".xlsx"):
-            log.warning(f"not and excel file:>\n" f" - Info: file name is {filename}")
-            continue
-        # gets and processes the names of the county's
-        county_name = filename.replace("Copy of Maine, ", "").replace(
-            " County Sources.xlsx", ""
+    client = Client(config=gs_config)
+    spread_info = client.find_spreadsheet_files_in_folders("SourceFiles")["SourceFiles"]
+
+    for info_dict in spread_info:
+        spread_id = info_dict["id"]
+        county_name = (
+            info_dict["name"]
+            .replace("Copy of", "")
+            .replace("Maine,", "")
+            .replace("County Sources", "")
+            .strip()
+            .lower()
         )
+        # update counts and start a per-file timer and print.
         file_start_time = time.time()
         t += 1
-        log.info(f"sources: starting file {t}/{len(file_list)}, {filename}...")
+        log.info(f"sources: starting file {t}/{len(spread_info)}, {county_name}...")
 
-        # gets the sheet name from the Excel file.
-        sheet_names = pd.ExcelFile(f"rawFairSourcesData/{filename}").sheet_names
+        spreadsheet = Spread(spread_id, config=gs_config)
 
-        # loops over the sheet names in the Excel file
-        for sheet in sheet_names:
+        sheets = spreadsheet.sheets
 
-            read_source_excel = pd.read_excel(
-                f"rawFairSourcesData/{filename}",
-                sheet_name=sheet,
-                keep_default_na=False,
-            )
+        for sheet in sheets:
+
+            sheet_name = sheet.title.strip().lower()
+            spreadsheet.open_sheet(sheet)
+
+            read_source_excel = spreadsheet.sheet_to_df().reset_index()
 
             col_heads = list(read_source_excel.columns)
 
             # runs the headers debug check.
             _check_column_header(
-                headers=col_heads, log=log, county=filename, sheet=sheet
+                headers=col_heads, log=log, county=county_name, sheet=sheet_name
             )
 
             for i in range(read_source_excel.shape[0]):
@@ -306,13 +311,6 @@ def _get_data_from_sources(log) -> pd.DataFrame:
                 if year != " " and year != "":
                     # reads the data from the file.
 
-                    #  this is deprecated
-                    # event: str = _get_data_from_sheets(
-                    #     read_source_excel,
-                    #     column="Event",
-                    #     index=i,
-                    #     log=log,
-                    # )
                     location: str = _get_data_from_sheets(
                         read_source_excel, "Location", i, log=log
                     )
@@ -334,17 +332,21 @@ def _get_data_from_sources(log) -> pd.DataFrame:
 
                     # uses previously define functions to clean the page # and the note(Premiums/description)
                     page_numbers_clean = _clean_source_separate_page_number(
-                        page_nums, filename=filename, sheet=sheet, year=year, log=log
+                        page_nums,
+                        county_name=county_name,
+                        sheet=sheet_name,
+                        year=year,
+                        log=log,
                     )
                     premiums, description = _clean_notes(
-                        notes, filename=filename, sheet=sheet, log=log
+                        notes, filename=county_name, sheet=sheet_name, log=log
                     )
 
                     # constructs a library and clean the rest of the data.
                     rows.append(
                         {
-                            "County": cleanup_str(county_name),
-                            "Event": cleanup_str(sheet),
+                            "County": county_name,
+                            "Event": sheet_name,
                             "Year": int(year),
                             # "Old Event": cleanup_str(event),
                             "Location": cleanup_str(location),
@@ -365,7 +367,7 @@ def _get_data_from_sources(log) -> pd.DataFrame:
                             "Additional Notes": cleanup_str(additional_notes),
                             "Date": _clean_date(
                                 source_date,
-                                filename=filename,
+                                filename=county_name,
                                 sheet=sheet,
                                 year=year,
                                 log=log,
@@ -526,11 +528,11 @@ def _clean_source_data(source_df):
 """ this is the main function of this file. It is called by the main function and sets up processes the data."""
 
 
-def parse_sources(log, split_sources=True):
+def parse_sources(log: logging.Logger, gs_config, split_sources: bool = True):
     log.info("Parsing Sources...")
 
     # gets the data from the sheets
-    _source_data = _get_data_from_sources(log)
+    _source_data = _get_data_from_sources(log, gs_config)
 
     _check_for_duplicates(log, _source_data)
     _source_data.drop_duplicates(inplace=True)
@@ -560,5 +562,5 @@ def parse_sources(log, split_sources=True):
 
 if __name__ == "__main__":
     sources_log = setup_logging("Sources Log")
-    sources = parse_sources(sources_log, split_sources=False)
+    sources = parse_sources(sources_log, get_gs_config(), split_sources=False)
     to_csv_file(path="cleanedData/Sources", name="sources", df=sources)
