@@ -88,7 +88,7 @@ def main() -> None:
     log = setup_logging("Main log")  # this is the logger setup!
 
     log.info("make config")
-    gs_config = get_gs_config("JackClientIDs.json")
+    gs_config = get_gs_config("Secrets/JackClientIDs.json")
     # calls the function that parses the Apple data.
     apple_df = parse_apple(log, gs_config)
     log.info(f"apple dataframe events are cleaned")

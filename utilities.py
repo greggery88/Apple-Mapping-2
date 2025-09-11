@@ -7,7 +7,7 @@ from gspread_pandas import conf, Client, Spread
 from os import path
 
 
-def get_gs_config(service_account_file_path="service_account.json"):
+def get_gs_config(service_account_file_path="Secrets/JackClientIDs.json"):
 
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
