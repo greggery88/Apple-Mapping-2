@@ -262,11 +262,22 @@ def _get_data_from_sources(log: logging.Logger, gs_config) -> pd.DataFrame:
 
     # functions for processing the data as it's read from the Excel files.
 
-    # list to story the data as is gathered from the Excel files
+    # list to store the data as it is gathered from the Excel files
     rows = []
 
     client = Client(config=gs_config)
-    spread_info = client.find_spreadsheet_files_in_folders("SourceFiles")["SourceFiles"]
+    folder_name = "SourceFilesTest"
+    folder_results = client.find_spreadsheet_files_in_folders(folder_name)[folder_name]
+    # Filter out trashed files based on possible keys from Drive responses
+    spread_info = [
+        info
+        for info in folder_results
+        if not (
+            info.get("trashed")
+            or info.get("explicitlyTrashed")
+            or (info.get("labels") or {}).get("trashed")
+        )
+    ]
 
     for info_dict in spread_info:
         spread_id = info_dict["id"]
@@ -368,7 +379,7 @@ def _get_data_from_sources(log: logging.Logger, gs_config) -> pd.DataFrame:
                             "Date": _clean_date(
                                 source_date,
                                 filename=county_name,
-                                sheet=sheet,
+                                sheet=sheet_name,
                                 year=year,
                                 log=log,
                             ),
