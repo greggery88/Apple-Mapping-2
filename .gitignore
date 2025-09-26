@@ -1,3 +1,11 @@
 /Secrets/*
 /rawFilesAll/*
-/RawFiles/*
+/rawFiles/raw_apples/*
+/rawFiles/raw_sources/*
+/AdlerData/*
+/cleanedData/AppleNamesCleaned/*
+/cleanedData/Apples/*
+/cleanedData/Full/*
+/cleanedData/Merged/*
+/cleanedData/Sources/*
+/debugInfo/*
