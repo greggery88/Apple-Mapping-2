@@ -1,41 +1,50 @@
-from fontTools.misc.arrayTools import pointInRect
+import logging
 from oauth2client import service_account
 from googleapiclient.discovery import build
 from ratelimit import limits, sleep_and_retry
 from time import time
 import pandas as pd
-
-from utilities import to_csv_file
+from utilities import to_csv_file, setup_logging
 
 APPLE_FILES_FOLDER_ID = "1Clo7Sax3tSzm_xJGiVc4E2jMNDONaR8F"
 SOURCE_FILES_FOLDER_ID = "1jQy_1sIVniSFhC2Zc4PfK-jS3N4AHcbi"
-
 SCOPE = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
 
-def _collect_data_from_google(folder_id):
+def get_google_apis_with_service_account(log: logging.Logger):
     start_time = time()
     credentials = service_account.ServiceAccountCredentials.from_json_keyfile_name(
         "Secrets/service_account.json"
     )
-    print("credentials loaded", time() - start_time)
+    log.info(f"credentials loaded for service agent: time = {time() - start_time}")
 
     service_time = time()
     spreadsheet_service = build("sheets", "v4", credentials=credentials)
     drive_service = build("drive", "v3", credentials=credentials)
-    print("services loaded", time() - service_time)
 
+    log.info(f"spreads and drive services agents loaded: time = {time() - start_time}")
+    return drive_service, spreadsheet_service
+
+
+def _collect_data_from_google(
+    log: logging.Logger, folder_id: str, drive_service, spreadsheet_service
+) -> dict:
+    start_time = time()
     apple_data_dict = _get_the_data_from_all_spreadsheets(
-        drive_service, spreadsheet_service, folder_id
+        log=log,
+        folder_id=folder_id,
+        drive_api_service=drive_service,
+        spread_api_service=spreadsheet_service,
     )
+    log.info(f"data from all spreadsheets collected: time = {time() - start_time}")
     return apple_data_dict
 
 
 def _get_the_data_from_all_spreadsheets(
-    drive_api_service, sheet_api_service, folder_id: str
+    log: logging.Logger, folder_id, drive_api_service, spread_api_service: str
 ):
     apple_files_names_and_ids = _get_spreadsheet_names_and_ids(
         drive_api_service, folder_id=folder_id
@@ -43,17 +52,20 @@ def _get_the_data_from_all_spreadsheets(
     full_data_dict = {}
 
     for spreadsheet_name_and_id in apple_files_names_and_ids:
+        start_time = time()
         dict_of_spreadsheets = {}
         spreadsheet_name = spreadsheet_name_and_id["name"]
         spreadsheet_id = dict_of_spreadsheets["id"] = spreadsheet_name_and_id["id"]
 
         timey_wimey = time()
         dict_of_spreadsheets["data"] = _get_data_from_spreadsheet(
-            sheet_api_service, spreadsheet_id
+            spread_api_service, spreadsheet_id
         )
 
         full_data_dict[spreadsheet_name] = dict_of_spreadsheets
-        print("done with", spreadsheet_name, "!!!", time() - timey_wimey)
+        log.info(
+            f"finished getting data from {spreadsheet_name} ! : time = {time() - start_time}"
+        )
     return full_data_dict
 
 
@@ -120,7 +132,7 @@ def _make_df_of_all_spreads(raw_data_dict: dict) -> pd.DataFrame:
     return _df_of_all_spreads
 
 
-def _get_all_spreadsheet_data_into_pandas(_df_of_all_spreads: pd.DataFrame):
+def _get_all_spreadsheet_data_into_pandas(log, _df_of_all_spreads: pd.DataFrame):
     def _applied_get_spreads_data_into_pandas(data_x):
         def _get_sheets_data_into_pandas(values_x):
             df = pd.DataFrame(values_x, index=None)
@@ -129,7 +141,9 @@ def _get_all_spreadsheet_data_into_pandas(_df_of_all_spreads: pd.DataFrame):
 
             # drop none columns
             if len(df.columns[df.columns.isna()]) > 0:
-                print(f"dropped none columns: {df.columns[df.columns.isna()]}")
+                log.warning(
+                    f"columns containing none values, dropping none columns: {df.columns[df.columns.isna()]}"
+                )
                 df.drop(columns=df.columns[df.columns.isna()], inplace=True)
             return df
 
@@ -179,11 +193,21 @@ def _reformat_df_of_all_spreads_data(
 
 
 def get_data_from_google_sheets_into_one_large_data_frame(
+    log: logging.Logger,
     folder_id: str,
+    drive_service,
+    spreadsheet_service,
 ) -> pd.DataFrame:
-    raw_data_dict = _collect_data_from_google(folder_id=folder_id)
+    raw_data_dict = _collect_data_from_google(
+        log=log,
+        folder_id=folder_id,
+        drive_service=drive_service,
+        spreadsheet_service=spreadsheet_service,
+    )
     df_of_all_spreads = _make_df_of_all_spreads(raw_data_dict)
-    df_of_all_spreads = _get_all_spreadsheet_data_into_pandas(df_of_all_spreads)
+    df_of_all_spreads = _get_all_spreadsheet_data_into_pandas(
+        log=log, _df_of_all_spreads=df_of_all_spreads
+    )
     df_of_all_spreads = _add_county_event_name_to_df_of_all_spreads_data(
         df_of_all_spreads
     )
@@ -192,6 +216,33 @@ def get_data_from_google_sheets_into_one_large_data_frame(
 
 
 if __name__ == "__main__":
-    to_csv_file(
-        get_data_from_google_sheets_into_one_large_data_frame(APPLE_FILES_FOLDER_ID),
+    full_start_time = time()
+    drive, spread = get_google_apis_with_service_account(
+        setup_logging("google_apis_log")
     )
+    gcd_log = setup_logging("GCD log")
+    start_time = time()
+    to_csv_file(
+        path="rawFiles/raw_apples",
+        name="raw_data_apples",
+        df=get_data_from_google_sheets_into_one_large_data_frame(
+            log=gcd_log,
+            folder_id=APPLE_FILES_FOLDER_ID,
+            drive_service=drive,
+            spreadsheet_service=spread,
+        ),
+    )
+    gcd_log.info(f"time to get apples: {time() - start_time}")
+    start_time = time()
+    to_csv_file(
+        path="rawFiles/raw_sources",
+        name="raw_data_sources",
+        df=get_data_from_google_sheets_into_one_large_data_frame(
+            folder_id=SOURCE_FILES_FOLDER_ID,
+            log=gcd_log,
+            drive_service=drive,
+            spreadsheet_service=spread,
+        ),
+    )
+    gcd_log.info(f"time to get sources: {time() - start_time}")
+    gcd_log.info(f"full time: {time() - full_start_time}")

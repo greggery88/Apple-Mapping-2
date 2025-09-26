@@ -411,11 +411,12 @@ def _check_for_duplicates(log, df) -> None:
 
 
 def _add_cords(log, source_df):
-    cords = pd.read_csv("longLatCords/townCords.csv")
-    source_df = source_df.merge(cords, on=["Location"], how="left")
+    coords = get_town_coordinates()
+
+    source_df = source_df.merge(coords, on=["Location"], how="left")
 
     source_df.replace("", np.nan, inplace=True)
-    llc = pd.read_csv("longLatCords/countyCords.csv")
+    llc = get_county_coordinates()
     source_df = source_df.merge(llc, on="County", suffixes=("", "_llc"), how="left")
     source_df.loc[source_df["Location"].isna(), ["Latitude"]] = source_df[
         "Latitude_llc"

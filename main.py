@@ -5,6 +5,11 @@ from parseAppleData import parse_apple
 from utilities import *
 import numpy as np
 
+## TO DO
+
+# - add logging to collecting google sheets
+
+
 """
 MAIN:
 
