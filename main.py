@@ -1,9 +1,12 @@
+import collectDataFromSheets
 from cleanAppleNames import clean_apple_names
 from mergeSourceAndApples import merge_sources_n_apples
-from parseSources import parse_sources
-from parseAppleData import parse_apple
+import cleanSources
+
 from utilities import *
 import numpy as np
+from loggingUtil import setup_logging
+from reformatData import reformate_data_and_clean_it
 
 ## TO DO
 
@@ -90,42 +93,40 @@ def main() -> None:
     it starts by setting up a logger, which is the system that prints out information
     about the process, warnings, and errors.
     """
-    log = setup_logging("Main log")  # this is the logger setup!
+    log = setup_logging("MainLog")  # this is the logger setup!
 
-    log.info("make config")
-    gs_config = get_gs_config("Secrets/JackClientIDs.json")
-    # calls the function that parses the Apple data.
-    apple_df = parse_apple(log, gs_config)
+    raw_apples, raw_sources = (
+        collectDataFromSheets.collect_data_from_google_sheets_main(
+            log.getChild("GCDLog")
+        )
+    )
+    reformated_apples, reformated_sources = reformate_data_and_clean_it(
+        log=log.getChild("ReformatLog"), apples=raw_apples, sources=raw_sources
+    )
+
+    clean_sources = cleanSources.clean_sources(
+        log.getChild("CleanSourcesLog"), reformated_sources
+    )
     log.info(f"apple dataframe events are cleaned")
 
-    apple_df.replace("", np.nan, inplace=True)
+    reformated_apples.replace("", np.nan, inplace=True)
 
     log.info("cleaning apple names")
-    apple_df = clean_apple_names(
+    clean_apples = clean_apple_names(
         log,
-        apple_df,
+        reformated_apples,
         separate_presumed_names=False,
         separate_given_names=False,
         separate_alt_names=False,
     )
     log.info("cleaned apple names!")
 
-    # calls the function that parses the sources.
-    source_df = parse_sources(log, gs_config, split_sources=False)
-    log.info(f"source dataframe events are cleaned")
-
     # merge sources and Apple's data.
-    data = merge_sources_n_apples(log, apple_df, source_df)
+    data = merge_sources_n_apples(log, clean_apples, clean_sources)
 
     # send to csv
     to_csv_file(df=data, path="cleanedData/Full", name="data")
-    clean_spread = Spread(
-        spread=f"CleanedData_{get_datetime()}", create_spread=True, config=gs_config
-    )
-    clean_spread.move(path="/TestFilesApples/OutputData/")
-    clean_spread.df_to_sheet(data, index=False, headers=True)
-    spreadsheet_url = clean_spread.url
-    print(f"Spreadsheet URL: {spreadsheet_url}")
+
     log.info(f"final data written to data.csv")
 
 

@@ -1,7 +1,8 @@
-from utilities import setup_logging, get_datetime, find_latest_file
+from utilities import get_datetime, find_latest_file
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from loggingUtil import setup_logging
 
 
 def _merge_indicators_to_as(x):

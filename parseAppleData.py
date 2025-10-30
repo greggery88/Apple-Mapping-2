@@ -2,14 +2,12 @@ import logging
 import sys
 import pandas as pd
 import time
-from gspread_pandas import Spread, Client
 from utilities import (
     cleanup_str,
-    setup_logging,
     clean_events_strings,
     to_csv_file,
-    get_gs_config,
 )
+from loggingUtil import setup_logging
 from fuzzywuzzy import process
 
 pd.set_option("future.no_silent_downcasting", True)
@@ -276,5 +274,5 @@ def parse_apple(log: logging.Logger, gs_config) -> pd.DataFrame:
 
 if __name__ == "__main__":  # this is only for debugging this file
     apple_log = setup_logging("Apples log")
-    apples = parse_apple(apple_log, get_gs_config())
+    apples = parse_apple(apple_log)
     to_csv_file(path="cleanedData/Apples", name="apples", df=apples)

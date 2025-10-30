@@ -465,15 +465,15 @@ def _find_and_fix_source_duplicated_multiple_sheets(
             f" - Data: {duplicated}\n"
             f" -  Fix: only keep the first data points\n"
         )
-
-    new_source_df = source_df.loc[
-        ~(
-            source_df.duplicated(
-                subset=["Event", "Year", "Publication", "Date"], keep="first"
-            )
+        to_csv_file(
+            path="debugInfo",
+            name="DebugFile-DuplicatesOverMultipleSheets",
+            df=duplicated,
         )
-    ]
-    return new_source_df
+
+    return source_df.drop_duplicates(
+        subset=["Event", "Year", "Publication", "Date"], keep="first"
+    )
 
 
 def _clean_source_data(source_df):

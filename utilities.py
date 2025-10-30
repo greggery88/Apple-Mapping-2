@@ -1,28 +1,79 @@
 import logging
+from typing import Optional
+
 import pandas as pd
 import os
 import numpy as np
 from datetime import datetime
+from oauth2client import service_account
+from googleapiclient.discovery import build
+from time import time
 
 
-def get_town_coordinates() -> pd.DataFrame:
-    coords = Spread("TownCoordinatesTest", config=get_gs_config())
-    coords = coords.sheet_to_df()
-    coords = coords.sort_index().reset_index()
-    coords["Latitude"] = coords["Latitude"].apply(lambda x: np.float64(x))
-    coords["Longitude"] = coords["Longitude"].apply(lambda x: np.float64(x))
-    coords["Location"] = coords["Location"].apply(lambda x: x.strip())
-    return coords
+def get_google_apis_with_service_account(log: logging.Logger):
+    start_time = time()
+    credentials = service_account.ServiceAccountCredentials.from_json_keyfile_name(
+        "Secrets/service_account.json"
+    )
+    log.info(f"credentials loaded for service agent: time = {time() - start_time}")
+
+    service_time = time()
+    spreadsheet_service = build("sheets", "v4", credentials=credentials)
+    drive_service = build("drive", "v3", credentials=credentials)
+
+    log.info(f"spreads and drive services agents loaded: time = {time() - start_time}")
+    return drive_service, spreadsheet_service
 
 
-def get_county_coordinates() -> pd.DataFrame:
-    coords = Spread("CountyCoordinatesTest", config=get_gs_config())
-    coords = coords.sheet_to_df()
-    coords = coords.sort_index().reset_index()
-    coords["Latitude"] = coords["Latitude"].apply(lambda x: np.float64(x))
-    coords["Longitude"] = coords["Longitude"].apply(lambda x: np.float64(x))
-    coords["County"] = coords["County"].apply(lambda x: x.strip())
-    return coords
+def get_name_key(
+    spread_api, file_id: str = "1jRsjyeRFrRQg0OzqpHi-hnHPPOW7fq7BcuB74geunCo"
+) -> pd.DataFrame:
+    name_key_2d_list = (
+        spread_api.spreadsheets()
+        .values()
+        .get(spreadsheetId=file_id, range="nameKey")
+        .execute()["values"]
+    )
+    return pd.DataFrame(data=name_key_2d_list[1:], columns=name_key_2d_list[0])
+
+
+def get_town_coordinates(
+    spread_api, file_id: str = "1wk6gTJoGRpFZGYwi4FDfY-srXutqEfzaGO-7dWzlXwk"
+) -> pd.DataFrame:
+    town_coordinates_2d_list = (
+        spread_api.spreadsheets()
+        .values()
+        .get(spreadsheetId=file_id, range="townCords")
+        .execute()["values"]
+    )
+    town_coord_df = pd.DataFrame(
+        data=town_coordinates_2d_list[1:], columns=town_coordinates_2d_list[0]
+    )
+    town_coord_df["Latitude"].apply(lambda x: float(x))
+    town_coord_df["Latitude"] = town_coord_df["Latitude"].astype(float)
+    town_coord_df["Longitude"].apply(lambda x: float(x))
+    town_coord_df["Longitude"] = town_coord_df["Longitude"].astype(float)
+
+    return town_coord_df
+
+
+def get_county_coordinates(
+    spread_api, file_id: str = "1_XoY0TPxS7wBbDBFjjJulULMmuD0VHRveHR2i9Xhiu8"
+) -> pd.DataFrame:
+    county_coordinates_2d_list = (
+        spread_api.spreadsheets()
+        .values()
+        .get(spreadsheetId=file_id, range="countyCords")
+        .execute()["values"]
+    )
+    county_coords_df = pd.DataFrame(
+        data=county_coordinates_2d_list[1:], columns=county_coordinates_2d_list[0]
+    )
+    county_coords_df["Latitude"].apply(lambda x: float(x))
+    county_coords_df["Latitude"] = county_coords_df["Latitude"].astype(float)
+    county_coords_df["Longitude"].apply(lambda x: float(x))
+    county_coords_df["Longitude"] = county_coords_df["Longitude"].astype(float)
+    return county_coords_df
 
 
 def get_datetime() -> str:
@@ -37,9 +88,9 @@ def to_csv_file_custom_time(path: str, name: str, df: pd.DataFrame, time: str) -
     df.to_csv(f"{path}/{name}_{time}.csv", index=False)
 
 
-def find_latest_file(file_type: str) -> pd.DataFrame:
+def find_latest_file(file_type: str, path_to="cleanedData") -> pd.DataFrame:
     file_names = pd.DataFrame(
-        data=os.listdir(f"cleanedData/{file_type}"), columns=["files"]
+        data=os.listdir(f"{path_to}/{file_type}"), columns=["files"]
     )
     file_names[["type", "datetime"]] = file_names["files"].str.split("_", expand=True)
     file_names["datetime"] = pd.to_datetime(
@@ -48,18 +99,21 @@ def find_latest_file(file_type: str) -> pd.DataFrame:
     name = file_names.loc[
         file_names["datetime"] == file_names["datetime"].max(), "files"
     ].values[0]
-    return pd.read_csv(f"cleanedData/{file_type}/{name}")
+    return pd.read_csv(f"{path_to}/{file_type}/{name}", low_memory=False)
 
 
 def cleanup_str(string: str) -> str:
-    return (
-        string.lower()
-        .strip()
-        .replace("?", "")
-        .replace("()", "")
-        .replace("  ", " ")
-        .replace("(pears)", "(pear)")
-    )
+    if isinstance(string, str):
+        return (
+            string.lower()
+            .strip()
+            .replace("?", "")
+            .replace("()", "")
+            .replace("  ", " ")
+            .replace("(pears)", "(pear)")
+        )
+    else:
+        return string
 
 
 def clean_events_strings(df: pd.DataFrame) -> pd.DataFrame:
@@ -99,42 +153,3 @@ def clean_events_strings(df: pd.DataFrame) -> pd.DataFrame:
 
     df["Event"] = df["Event"].fillna("").map(_clean_event_string)
     return df.replace("", np.nan)
-
-
-def setup_logging(label: str) -> logging.Logger:
-    # create logger with 'spam_application'
-    logger = logging.getLogger(label)
-    logger.setLevel(logging.DEBUG)
-
-    # create console handler with a higher log level
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
-
-    ch.setFormatter(CustomFormatter())
-
-    logger.addHandler(ch)
-    return logger
-
-
-class CustomFormatter(logging.Formatter):
-
-    grey = "\x1b[37m"
-    yellow = "\x1b[33;20m"
-    red = "\x1b[31;20m"
-    bold_red = "\x1b[31;1m"
-    reset = "\x1b[0m"
-    green = "\x1b[32m"
-    format = "%(levelname)s - %(name)s - %(message)s (%(filename)s:%(lineno)d)"
-
-    FORMATS = {
-        logging.DEBUG: grey + format + reset,
-        logging.INFO: green + format + reset,
-        logging.WARNING: yellow + format + reset,
-        logging.ERROR: red + format + reset,
-        logging.CRITICAL: bold_red + format + reset,
-    }
-
-    def format(self, record):
-        log_fmt = self.FORMATS.get(record.levelno)
-        formatter = logging.Formatter(log_fmt)
-        return formatter.format(record)

@@ -2,7 +2,13 @@ import logging
 import sys
 import pandas as pd
 import numpy as np
-from utilities import setup_logging, find_latest_file, get_datetime, to_csv_file
+from utilities import (
+    find_latest_file,
+    get_datetime,
+    to_csv_file,
+    get_name_key,
+)
+from loggingUtil import setup_logging
 
 
 def _fix_presumed_name(df: pd.DataFrame) -> pd.DataFrame:
@@ -73,9 +79,10 @@ def _make_pivot_table_and_merge_on_use_name(
 
 def _add_use_names(log: logging.Logger, df: pd.DataFrame) -> pd.DataFrame:
     log.info("Importing Name Key!")
+    # name_key = get_name_key()
     name_key = pd.read_csv("sourceKeys/NameKey.csv")
 
-    # merge use name key with data!
+    # merge use name_key with data!
     corrected_df = df.merge(
         name_key,
         on=["Given Name Clean", "IsApple"],
@@ -97,7 +104,7 @@ def _autofill_use_name(log: logging.Logger, df: pd.DataFrame) -> pd.DataFrame:
             " -  this is not a massive problem just needs to be checked"
         )
 
-        # write the information about the autofilled data point to a file called:  DebugFile_Autofilled_UseName:AltPresumedNameClean.
+        # write the information about the autofilled data point to a file called: DebugFile_Autofilled_UseName:AltPresumedNameClean.
         df.loc[df["Use Name"].isna() & df["Presumed Name: 1"].notna()].to_csv(
             "debugInfo/DebugFile_Autofilled_UseName_AltPresumedNameClean.csv",
             index=False,
@@ -126,7 +133,7 @@ def _autofill_use_name(log: logging.Logger, df: pd.DataFrame) -> pd.DataFrame:
             " -  this is not a massive problem just needs to be checked\n"
         )
 
-        # write the information about the autofilled data point to a file called:  DebugFile_Autofilled_UseName:AltPresumedNameClean.
+        # write the information about the autofilled data point to a file called: DebugFile_Autofilled_UseName:AltPresumedNameClean.
         df[df["Use Name"].isna() & df["Given Name Clean"].notna()].to_csv(
             "debugInfo/DebugFile_Autofilled_UseName_GivenNameClean.csv", index=False
         )
@@ -243,7 +250,7 @@ def clean_apple_names(
         apple_data, "Alt Given Names", "Given Name Clean"
     )
 
-    # some logic for edit what info this give you
+    # some logic for edit what info this gives you
     if not debug_presumed_name_from:
         apple_data.drop(columns="Debug Presumed Name From:", inplace=True)
     if not debug_auto_filled_from:

@@ -1,10 +1,15 @@
 import logging
-from oauth2client import service_account
-from googleapiclient.discovery import build
+
+import googleapiclient.errors
 from ratelimit import limits, sleep_and_retry
+import time
 from time import time
 import pandas as pd
-from utilities import to_csv_file, setup_logging
+
+import loggingUtil
+from loggingUtil import log_formated
+from utilities import to_csv_file, get_google_apis_with_service_account
+
 
 APPLE_FILES_FOLDER_ID = "1Clo7Sax3tSzm_xJGiVc4E2jMNDONaR8F"
 SOURCE_FILES_FOLDER_ID = "1jQy_1sIVniSFhC2Zc4PfK-jS3N4AHcbi"
@@ -14,65 +19,25 @@ SCOPE = [
 ]
 
 
-def get_google_apis_with_service_account(log: logging.Logger):
-    start_time = time()
-    credentials = service_account.ServiceAccountCredentials.from_json_keyfile_name(
-        "Secrets/service_account.json"
-    )
-    log.info(f"credentials loaded for service agent: time = {time() - start_time}")
-
-    service_time = time()
-    spreadsheet_service = build("sheets", "v4", credentials=credentials)
-    drive_service = build("drive", "v3", credentials=credentials)
-
-    log.info(f"spreads and drive services agents loaded: time = {time() - start_time}")
-    return drive_service, spreadsheet_service
-
-
 def _collect_data_from_google(
     log: logging.Logger, folder_id: str, drive_service, spreadsheet_service
 ) -> dict:
-    start_time = time()
+    start_time_for_c_d_f_g = time()
     apple_data_dict = _get_the_data_from_all_spreadsheets(
         log=log,
         folder_id=folder_id,
         drive_api_service=drive_service,
         spread_api_service=spreadsheet_service,
     )
-    log.info(f"data from all spreadsheets collected: time = {time() - start_time}")
+    log.info(
+        f"data from all spreadsheets collected: time = {time() - start_time_for_c_d_f_g}"
+    )
     return apple_data_dict
 
 
 def _get_the_data_from_all_spreadsheets(
     log: logging.Logger, folder_id, drive_api_service, spread_api_service: str
 ):
-    apple_files_names_and_ids = _get_spreadsheet_names_and_ids(
-        drive_api_service, folder_id=folder_id
-    )
-    full_data_dict = {}
-
-    for spreadsheet_name_and_id in apple_files_names_and_ids:
-        start_time = time()
-        dict_of_spreadsheets = {}
-        spreadsheet_name = spreadsheet_name_and_id["name"]
-        spreadsheet_id = dict_of_spreadsheets["id"] = spreadsheet_name_and_id["id"]
-
-        timey_wimey = time()
-        dict_of_spreadsheets["data"] = _get_data_from_spreadsheet(
-            spread_api_service, spreadsheet_id
-        )
-
-        full_data_dict[spreadsheet_name] = dict_of_spreadsheets
-        log.info(
-            f"finished getting data from {spreadsheet_name} ! : time = {time() - start_time}"
-        )
-    return full_data_dict
-
-
-# one call of drive API
-def _get_spreadsheet_names_and_ids(
-    drive_api_service, folder_id: str
-) -> list[dict[str, str]]:
     spreadsheet_names_and_ids = (
         drive_api_service.files()
         .list(
@@ -85,13 +50,35 @@ def _get_spreadsheet_names_and_ids(
     )["files"]
     if spreadsheet_names_and_ids is None:
         raise Exception("unable to get spreadsheet names and ids!!")
-    return spreadsheet_names_and_ids
+
+    full_data_dict = {}
+
+    for spreadsheet_name_and_id in spreadsheet_names_and_ids:
+        start_time_of_get_data = time()
+
+        dict_of_spreadsheets = {}
+
+        spreadsheet_name = spreadsheet_name_and_id["name"]
+        spreadsheet_id = dict_of_spreadsheets["id"] = spreadsheet_name_and_id["id"]
+
+        dict_of_spreadsheets["data"] = _get_data_from_spreadsheet(
+            spread_api_service, spreadsheet_id, log
+        )
+
+        full_data_dict[spreadsheet_name] = dict_of_spreadsheets
+
+        log.info(
+            f"finished getting data from {spreadsheet_name} ! : time = {time() - start_time_of_get_data}"
+        )
+    return full_data_dict
 
 
 # two calls of sheets API, one internal and one from get_sheets_names_from_spreadsheet
 @sleep_and_retry
 @limits(calls=25, period=60)
-def _get_data_from_spreadsheet(sheet_api_service, spreadsheet_id: str) -> list[dict]:
+def _get_data_from_spreadsheet(
+    sheet_api_service, spreadsheet_id: str, log
+) -> list[dict]:
     names_of_sheets = _get_sheets_names_from_spreadsheet(
         sheet_api_service, spreadsheet_id
     )
@@ -124,9 +111,11 @@ def _make_df_of_all_spreads(raw_data_dict: dict) -> pd.DataFrame:
     _df_of_all_spreads.rename(columns={"index": "county name"}, inplace=True)
     _df_of_all_spreads["county name"] = _df_of_all_spreads.iloc(axis=1)[0].apply(
         lambda x: x.lower()
-        .replace("county fairs", "")
+        .replace("county", "")
+        .replace("fairs", "")
         .replace("maine,", "")
         .replace("copy of ", "")
+        .replace("sources", "")
         .strip()
     )
     return _df_of_all_spreads
@@ -141,9 +130,13 @@ def _get_all_spreadsheet_data_into_pandas(log, _df_of_all_spreads: pd.DataFrame)
 
             # drop none columns
             if len(df.columns[df.columns.isna()]) > 0:
-                log.warning(
-                    f"columns containing none values, dropping none columns: {df.columns[df.columns.isna()]}"
+                log_formated(
+                    log.warning,
+                    name="ColumnsContainingNoneValues",
+                    info=f"The columns are: columns: {df.columns[df.columns.isna()]}",
+                    fix="Dropping none columns",
                 )
+
                 df.drop(columns=df.columns[df.columns.isna()], inplace=True)
             return df
 
@@ -215,34 +208,41 @@ def get_data_from_google_sheets_into_one_large_data_frame(
     return reformated_df_of_all_spreads.sort_index(axis=1)
 
 
-if __name__ == "__main__":
+def collect_data_from_google_sheets_main(log: logging.Logger):
     full_start_time = time()
-    drive, spread = get_google_apis_with_service_account(
-        setup_logging("google_apis_log")
-    )
-    gcd_log = setup_logging("GCD log")
+    gcd_log = log.getChild("CollectDataFromGoogleLog")
+    drive, spread = get_google_apis_with_service_account(log.getChild("GoogleApisLog"))
     start_time = time()
-    to_csv_file(
-        path="rawFiles/raw_apples",
-        name="raw_data_apples",
-        df=get_data_from_google_sheets_into_one_large_data_frame(
-            log=gcd_log,
-            folder_id=APPLE_FILES_FOLDER_ID,
-            drive_service=drive,
-            spreadsheet_service=spread,
-        ),
+    raw_extracted_apple_data = get_data_from_google_sheets_into_one_large_data_frame(
+        log=gcd_log,
+        folder_id=APPLE_FILES_FOLDER_ID,
+        drive_service=drive,
+        spreadsheet_service=spread,
     )
     gcd_log.info(f"time to get apples: {time() - start_time}")
+
     start_time = time()
-    to_csv_file(
-        path="rawFiles/raw_sources",
-        name="raw_data_sources",
-        df=get_data_from_google_sheets_into_one_large_data_frame(
-            folder_id=SOURCE_FILES_FOLDER_ID,
-            log=gcd_log,
-            drive_service=drive,
-            spreadsheet_service=spread,
-        ),
+    raw_extracted_source_data = get_data_from_google_sheets_into_one_large_data_frame(
+        folder_id=SOURCE_FILES_FOLDER_ID,
+        log=gcd_log,
+        drive_service=drive,
+        spreadsheet_service=spread,
     )
     gcd_log.info(f"time to get sources: {time() - start_time}")
-    gcd_log.info(f"full time: {time() - full_start_time}")
+    gcd_log.info(f"full time to get the data from google: {time() - full_start_time}")
+
+    return raw_extracted_apple_data, raw_extracted_source_data
+
+
+if __name__ == "__main__":
+    raw_apples, raw_sources = collect_data_from_google_sheets_main(
+        loggingUtil.setup_logging("Sub_GCD")
+    )
+
+    to_csv_file(path="rawFiles/raw_apples", name="rawDataApples", df=raw_apples)
+
+    to_csv_file(
+        path="rawFiles/raw_sources",
+        name="rawDataSources",
+        df=raw_sources,
+    )
